@@ -13,7 +13,7 @@ A lightweight tool for visualizing 2D colored noise patterns.
 ## Requirements
 
 - Python 3.11 or later
-- (Optional) CUDA Toolkit 12.0 or later
+- (Optional) CUDA Toolkit 12.0 or later and NVIDIA GPUs
   - Used for GPU acceleration. If a compatible GPU is unavailable, the code will fall back to CPU execution with OpenMP, although with significantly reduced performance.
 
 ## Installation
