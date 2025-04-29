@@ -1,0 +1,17 @@
+[project]
+name = "colors-of-noise-2d"
+version = "0.1.0"
+description = "A simple 2D colors of noise viewer"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "opencv-python>=4.11.0.86",
+    "pydantic>=2.11.3",
+    "pyviewer",
+    "research-utilities",
+    "torch>=2.7.0",
+]
+
+[tool.uv.sources]
+pyviewer = { git = "https://github.com/harskish/pyviewer.git" }
+research-utilities = { git = "https://github.com/ShineiArakawa/research-utilities.git", rev = "v1.1.0" }
