@@ -1,8 +1,11 @@
+import copy
+
 import cv2
 import numpy as np
 import pydantic.dataclasses as dataclasses
 import pyviewer.docking_viewer as docking_viewer
 import research_utilities.apply_color_map as _cm
+import research_utilities.plotting as _plotting
 import research_utilities.signal as _signal
 import research_utilities.torch_util as _torch_util
 import torch
@@ -33,7 +36,7 @@ class Params:
     beta                                : float        = 0.0
 
     scale_input_img_with_minmax         : bool         = False
-    scale_radial_psd_with_minmax        : bool         = True
+    scale_psd_with_minmax        : bool         = True
     scale_inv_img_with_minmax           : bool         = False
     scale_inv_img_with_log              : bool         = False
     # autopep8: on
@@ -76,6 +79,7 @@ class ColorOfNoiseVisualizer(docking_viewer.DockingViewer):
 
     def setup_state(self):
         self.state.params = Params()
+        self.state.prev_params = None
 
         self.state.img = None
         self.state.radial_psd = None
@@ -84,13 +88,34 @@ class ColorOfNoiseVisualizer(docking_viewer.DockingViewer):
         self.state.texture_mag = None
         self.state.texture_inv = None
 
+        self.state.all_img = None
+
     @property
     def params(self) -> Params:
         return self.state.params
 
+    def _add_title(self, img: np.ndarray, title: str) -> np.ndarray:
+        img = (img * 255.0).astype(np.uint8)
+        img = _plotting.add_title(
+            img,
+            title,
+            text_color=[255, 255, 255],
+            background_color=[0, 0, 0],
+            text_size=36,
+            is_BGR=False
+        )
+        img = img.astype(np.float32) / 255.0
+        img = np.clip(img, 0.0, 1.0)
+
+        return img
+
     def compute(self):
         SPATIAL_AXES = (0, 1)
         NUM_RADIAL_BINS = 1024
+
+        # Check if the parameters have changed
+        if self.state.prev_params is not None and self.state.prev_params == self.params:
+            return self.state.all_img
 
         # --------------------------------------------------------------------------------------------------------------------------------------------------------
         # Generate a white noise image
@@ -171,14 +196,14 @@ class ColorOfNoiseVisualizer(docking_viewer.DockingViewer):
         norm_img = normalize_0_to_1(norm_img, based_on_min_max=self.params.scale_input_img_with_minmax)
         self.state.texture_img = norm_img.copy()
 
-        # magnitude
+        # psd
         # take average over the channels
-        mag_img = magnitude.astype(np.float32)
-        mag_img = np.mean(mag_img, axis=2)
-        mag_img = _cm.apply_color_map(mag_img, 'viridis')  # Returned in BGR format
-        mag_img = cv2.cvtColor(mag_img, cv2.COLOR_BGR2RGB)
-        mag_img = normalize_0_to_1(mag_img, based_on_min_max=self.params.scale_radial_psd_with_minmax)
-        self.state.texture_mag = mag_img.copy()
+        psd_img = magnitude.astype(np.float32)
+        psd_img = np.mean(psd_img, axis=2)
+        psd_img = _cm.apply_color_map(psd_img, 'viridis')  # Returned in BGR format
+        psd_img = cv2.cvtColor(psd_img, cv2.COLOR_BGR2RGB)
+        psd_img = normalize_0_to_1(psd_img, based_on_min_max=self.params.scale_psd_with_minmax)
+        self.state.texture_psd = psd_img.copy()
 
         # inverse
         inv_img = inv_img.astype(np.float32)
@@ -188,7 +213,17 @@ class ColorOfNoiseVisualizer(docking_viewer.DockingViewer):
         self.state.texture_inv = inv_img.copy()
 
         # Concat side by side
-        all_img = np.concatenate((norm_img, mag_img, inv_img), axis=1)
+        all_img = np.concatenate(
+            (
+                self._add_title(norm_img, 'Input image'),
+                self._add_title(psd_img, 'Power spectral density'),
+                self._add_title(inv_img, 'Inverse image'),
+            ),
+            axis=1
+        )
+        self.state.all_img = all_img.copy()
+
+        self.state.prev_params = copy.deepcopy(self.params)
 
         return all_img
 
@@ -237,8 +272,8 @@ class ColorOfNoiseVisualizer(docking_viewer.DockingViewer):
             imgui.separator_text('Input image')
             self.params.scale_input_img_with_minmax = imgui.checkbox('Scale noise image with min-max', self.params.scale_input_img_with_minmax)[1]
 
-            imgui.separator_text('Radial PSD')
-            self.params.scale_radial_psd_with_minmax = imgui.checkbox('Scale radial PSD with min-max', self.params.scale_radial_psd_with_minmax)[1]
+            imgui.separator_text('Power spectral density')
+            self.params.scale_psd_with_minmax = imgui.checkbox('Scale PSD with min-max', self.params.scale_psd_with_minmax)[1]
 
             imgui.separator_text('Inverse image')
             self.params.scale_inv_img_with_minmax = imgui.checkbox('Scale inverse image with min-max', self.params.scale_inv_img_with_minmax)[1]
@@ -251,10 +286,10 @@ class ColorOfNoiseVisualizer(docking_viewer.DockingViewer):
                 imgui.separator_text('Input image')
                 imgui.text(f'Shape: {self.state.texture_img.shape}')
                 imgui.text(f'Min: {np.min(self.state.texture_img):.4f}, Max: {np.max(self.state.texture_img):.4f}, Mean: {np.mean(self.state.texture_img):.4f}, Std: {np.std(self.state.texture_img):.4f}')
-            if self.state.texture_mag is not None:
-                imgui.separator_text('Radial PSD')
-                imgui.text(f'Shape: {self.state.texture_mag.shape}')
-                imgui.text(f'Min: {np.min(self.state.texture_mag):.4f}, Max: {np.max(self.state.texture_mag):.4f}, Mean: {np.mean(self.state.texture_mag):.4f}, Std: {np.std(self.state.texture_mag):.4f}')
+            if self.state.texture_psd is not None:
+                imgui.separator_text('Power spectral density')
+                imgui.text(f'Shape: {self.state.texture_psd.shape}')
+                imgui.text(f'Min: {np.min(self.state.texture_psd):.4f}, Max: {np.max(self.state.texture_psd):.4f}, Mean: {np.mean(self.state.texture_psd):.4f}, Std: {np.std(self.state.texture_psd):.4f}')
             if self.state.texture_inv is not None:
                 imgui.separator_text('Inverse image')
                 imgui.text(f'Shape: {self.state.texture_inv.shape}')
