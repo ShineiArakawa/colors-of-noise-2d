@@ -31,7 +31,8 @@ class Params:
     seed                                : int          = 0
     img_size                            : int          = 512
     std                                 : float        = 1.0
-    n_points                            : int          = 1024
+    n_radial_bins                       : int          = 64
+    n_points                            : int          = 32
 
     beta                                : float        = 0.0
 
@@ -243,9 +244,10 @@ class ColorOfNoiseVisualizer(docking_viewer.DockingViewer):
     def toolbar(self):
         if imgui.collapsing_header('Noise parameters', flags=imgui.TreeNodeFlags_.default_open):
             self.params.seed = imgui.slider_int('Seed', self.params.seed, 0, 1000)[1]
-            self.params.img_size = imgui.slider_int('Image size', self.params.img_size, 128, 1024)[1]
+            self.params.img_size = imgui.slider_int('Image size', self.params.img_size, 16, 1024)[1]
             self.params.std = imgui.slider_float('Std. of Gaussian', self.params.std, 0.0, 50.0)[1]
-            self.params.n_points = imgui.slider_int('N points of Radial PSD', self.params.n_points, 512, 1024)[1]
+            self.params.n_radial_bins = imgui.slider_int('N radial bins', self.params.n_radial_bins, 32, 1024)[1]
+            self.params.n_points = imgui.slider_int('N points of Radial PSD', self.params.n_points, 32, 1024)[1]
 
         # ---------------------------------------------------------------------------------------------------
         # Plot radial power spectral density
