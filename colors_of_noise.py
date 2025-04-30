@@ -263,14 +263,14 @@ class ColorOfNoiseVisualizer(docking_viewer.DockingViewer):
                 min_size = min(self.state.img.shape[0], self.state.img.shape[1])
                 implot.setup_axes_limits(
                     1.0,
-                    min_size // 2 + 1,
+                    min_size + 1,
                     1e-12,
                     1e3,
                     imgui.Cond_.always.value,
                 )
 
                 min_size = min(self.state.img.shape[0], self.state.img.shape[1])
-                x_value = np.linspace(1.0, min_size // 2 + 1, len(self.state.radial_psd),  dtype=np.float64)
+                x_value = np.linspace(1.0, min_size + 1, len(self.state.radial_psd),  dtype=np.float64)
                 for i_channel, channel_label in enumerate(['R', 'G', 'B']):
                     radial_psd = np.ascontiguousarray(self.state.radial_psd[:, i_channel]).astype(np.float64)
                     implot.plot_line(f'Radial PSD - {channel_label}', x_value, radial_psd)
