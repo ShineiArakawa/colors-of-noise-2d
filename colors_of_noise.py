@@ -154,8 +154,8 @@ class ColorOfNoiseVisualizer(docking_viewer.DockingViewer):
         assert not np.isnan(scaling).any()
         assert not np.isinf(scaling).any()
 
-        freq_shifted = freq_shifted * scaling[:, :, np.newaxis]
-        freq_shifted = freq_shifted
+        # NOTE: The scaling is applied to the amplitude of the FFT, so we need to apply sqrt to the scaling factor
+        freq_shifted = freq_shifted * np.sqrt(scaling)[:, :, np.newaxis]
 
         assert freq_shifted.ndim == 3 and freq_shifted.shape[SPATIAL_AXES[0]] == freq_shifted.shape[SPATIAL_AXES[1]]
         assert not np.isnan(freq_shifted).any()
@@ -163,10 +163,8 @@ class ColorOfNoiseVisualizer(docking_viewer.DockingViewer):
 
         # --------------------------------------------------------------------------------------------------------------------------------------------------------
         # Calc radial profiles
-        spectral_density = np.abs(freq_shifted / (img.shape[SPATIAL_AXES[0]] * img.shape[SPATIAL_AXES[1]]))
+        spectral_density = np.abs(freq_shifted) / (img.shape[SPATIAL_AXES[0]] * img.shape[SPATIAL_AXES[1]])
         spectral_power_density = spectral_density ** 2
-
-        magnitude = 20.0 * np.log10(spectral_power_density + 1e-10)  # Convert to decibels
 
         radial_profile: np.ndarray = _module.calc_radial_psd_profile(
             to_cuda_device(torch.from_numpy(spectral_power_density).unsqueeze(0).contiguous()),
@@ -211,6 +209,7 @@ class ColorOfNoiseVisualizer(docking_viewer.DockingViewer):
 
         # psd
         # take average over the channels
+        magnitude = 20.0 * np.log10(spectral_power_density + 1e-10)  # Convert to decibels
         psd_img = magnitude.astype(np.float32)
         psd_img = np.mean(psd_img, axis=2)
         psd_img = _cm.apply_color_map(psd_img, 'viridis')  # Returned in BGR format
@@ -263,14 +262,13 @@ class ColorOfNoiseVisualizer(docking_viewer.DockingViewer):
                 min_size = min(self.state.img.shape[0], self.state.img.shape[1])
                 implot.setup_axes_limits(
                     1.0,
-                    min_size + 1,
+                    min_size // 2 + 1,
                     1e-12,
-                    1e3,
+                    1e2,
                     imgui.Cond_.always.value,
                 )
 
-                min_size = min(self.state.img.shape[0], self.state.img.shape[1])
-                x_value = np.linspace(1.0, min_size + 1, len(self.state.radial_psd),  dtype=np.float64)
+                x_value = np.linspace(1.0, min_size // 2 + 1.0, len(self.state.radial_psd),  dtype=np.float64)
                 for i_channel, channel_label in enumerate(['R', 'G', 'B']):
                     radial_psd = np.ascontiguousarray(self.state.radial_psd[:, i_channel]).astype(np.float64)
                     implot.plot_line(f'Radial PSD - {channel_label}', x_value, radial_psd)
