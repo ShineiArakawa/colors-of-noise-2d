@@ -36,9 +36,11 @@ class Params:
     beta                                : float        = 0.0
 
     scale_input_img_with_minmax         : bool         = False
-    scale_psd_with_minmax        : bool         = True
+    scale_psd_with_minmax               : bool         = True
     scale_inv_img_with_minmax           : bool         = False
     scale_inv_img_with_log              : bool         = False
+
+    add_title                           : bool         = True
     # autopep8: on
 
 # --------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -95,13 +97,16 @@ class ColorOfNoiseVisualizer(docking_viewer.DockingViewer):
         return self.state.params
 
     def _add_title(self, img: np.ndarray, title: str) -> np.ndarray:
+        # based on 512
+        text_size = max(int(36 * img.shape[0] / 512.0), 16)
+
         img = (img * 255.0).astype(np.uint8)
         img = _plotting.add_title(
             img,
             title,
             text_color=[255, 255, 255],
             background_color=[0, 0, 0],
-            text_size=36,
+            text_size=text_size,
             is_BGR=False
         )
         img = img.astype(np.float32) / 255.0
@@ -136,10 +141,17 @@ class ColorOfNoiseVisualizer(docking_viewer.DockingViewer):
         freq_base_x, freq_base_y = np.meshgrid(freq_base_x, freq_base_y, indexing='ij')
         freq_base = np.sqrt(freq_base_x ** 2 + freq_base_y ** 2)
 
-        scaling = 1.0 / (np.pow(freq_base, self.params.beta) + 1e-12)
+        scaling = np.pow(freq_base + 1e-12, self.params.beta)
 
         # Fix the scaling for the DC component
         scaling[scaling.shape[0] // 2, scaling.shape[1] // 2] = 1.0
+
+        self.state.scaling = scaling.copy()
+        assert scaling.ndim == 2
+        assert scaling.shape[0] == img.shape[SPATIAL_AXES[0]]
+        assert scaling.shape[1] == img.shape[SPATIAL_AXES[1]]
+        assert not np.isnan(scaling).any()
+        assert not np.isinf(scaling).any()
 
         freq_shifted = freq_shifted * scaling[:, :, np.newaxis]
         freq_shifted = freq_shifted
@@ -193,8 +205,8 @@ class ColorOfNoiseVisualizer(docking_viewer.DockingViewer):
         # Plot
         # img
         norm_img = img.astype(np.float32)
-        norm_img = normalize_0_to_1(norm_img, based_on_min_max=self.params.scale_input_img_with_minmax)
         self.state.texture_img = norm_img.copy()
+        norm_img = normalize_0_to_1(norm_img, based_on_min_max=self.params.scale_input_img_with_minmax)
 
         # psd
         # take average over the channels
@@ -202,22 +214,22 @@ class ColorOfNoiseVisualizer(docking_viewer.DockingViewer):
         psd_img = np.mean(psd_img, axis=2)
         psd_img = _cm.apply_color_map(psd_img, 'viridis')  # Returned in BGR format
         psd_img = cv2.cvtColor(psd_img, cv2.COLOR_BGR2RGB)
-        psd_img = normalize_0_to_1(psd_img, based_on_min_max=self.params.scale_psd_with_minmax)
         self.state.texture_psd = psd_img.copy()
+        psd_img = normalize_0_to_1(psd_img, based_on_min_max=self.params.scale_psd_with_minmax)
 
         # inverse
         inv_img = inv_img.astype(np.float32)
         if self.params.scale_inv_img_with_log:
             inv_img = np.log(np.abs(inv_img) + 1e-10)
-        inv_img = normalize_0_to_1(inv_img, based_on_min_max=self.params.scale_inv_img_with_minmax)
         self.state.texture_inv = inv_img.copy()
+        inv_img = normalize_0_to_1(inv_img, based_on_min_max=self.params.scale_inv_img_with_minmax)
 
         # Concat side by side
         all_img = np.concatenate(
             (
-                self._add_title(norm_img, 'Input image'),
-                self._add_title(psd_img, 'Power spectral density'),
-                self._add_title(inv_img, 'Inverse image'),
+                self._add_title(norm_img, 'Input image') if self.params.add_title else norm_img,
+                self._add_title(psd_img, 'Power spectral density') if self.params.add_title else psd_img,
+                self._add_title(inv_img, 'Inverse image') if self.params.add_title else inv_img,
             ),
             axis=1
         )
@@ -232,7 +244,7 @@ class ColorOfNoiseVisualizer(docking_viewer.DockingViewer):
         if imgui.collapsing_header('Noise parameters', flags=imgui.TreeNodeFlags_.default_open):
             self.params.seed = imgui.slider_int('Seed', self.params.seed, 0, 1000)[1]
             self.params.img_size = imgui.slider_int('Image size', self.params.img_size, 128, 1024)[1]
-            self.params.std = imgui.slider_float('Std. of Gaussian', self.params.std, 0.0, 10.0)[1]
+            self.params.std = imgui.slider_float('Std. of Gaussian', self.params.std, 0.0, 50.0)[1]
             self.params.n_points = imgui.slider_int('N points of Radial PSD', self.params.n_points, 512, 1024)[1]
 
         # ---------------------------------------------------------------------------------------------------
@@ -246,25 +258,44 @@ class ColorOfNoiseVisualizer(docking_viewer.DockingViewer):
                 implot.setup_axis_scale(implot.ImAxis_.y1, implot.Scale_.log10)
 
                 # Set axis limits
-                implot.setup_axis_limits(implot.ImAxis_.x1, 1.0, len(self.state.radial_psd))
-                implot.setup_axis_limits(implot.ImAxis_.y1, 1e-10, 1.0)
-                implot.setup_axis_limits_constraints(implot.ImAxis_.x1, 1.0, len(self.state.radial_psd))
-                implot.setup_axis_limits_constraints(implot.ImAxis_.y1, 1e-10, 1.0)
+                min_size = min(self.state.img.shape[0], self.state.img.shape[1])
+                implot.setup_axes_limits(
+                    1.0,
+                    min_size // 2 + 1,
+                    1e-12,
+                    1e3,
+                    imgui.Cond_.always.value,
+                )
 
-                # Fix the view and disable zoom
-                implot.setup_axis_zoom_constraints(implot.ImAxis_.x1, len(self.state.radial_psd), len(self.state.radial_psd))
-                implot.setup_axis_zoom_constraints(implot.ImAxis_.y1, 1.0, 1.0)
-
+                min_size = min(self.state.img.shape[0], self.state.img.shape[1])
+                x_value = np.linspace(1.0, min_size // 2 + 1, len(self.state.radial_psd),  dtype=np.float64)
                 for i_channel, channel_label in enumerate(['R', 'G', 'B']):
-                    radial_psd = np.ascontiguousarray(self.state.radial_psd[:, i_channel])
-                    implot.plot_line(f'Radial PSD - {channel_label}', radial_psd)
+                    radial_psd = np.ascontiguousarray(self.state.radial_psd[:, i_channel]).astype(np.float64)
+                    implot.plot_line(f'Radial PSD - {channel_label}', x_value, radial_psd)
 
                 implot.end_plot()
 
         # ---------------------------------------------------------------------------------------------------
         # Color of noise
         if imgui.collapsing_header('Color of noise', flags=imgui.TreeNodeFlags_.default_open):
-            self.params.beta = imgui.slider_float('Beta', self.params.beta, -2.0, 2.0)[1]
+            self.params.beta = imgui.slider_float('Beta', self.params.beta, -4.0, 4.0)[1]
+
+            if imgui.button('Red'):
+                self.params.beta = -2.0
+            imgui.same_line()
+            if imgui.button('Pink'):
+                self.params.beta = -1.0
+            imgui.same_line()
+            if imgui.button('white'):
+                self.params.beta = 0.0
+            imgui.same_line()
+            if imgui.button('Blue'):
+                self.params.beta = 1.0
+            imgui.same_line()
+            if imgui.button('Purple'):
+                self.params.beta = 2.0
+
+            imgui.text(r'S \propto f^{\beta}')
 
         # ---------------------------------------------------------------------------------------------------
         # Visualization parameters
@@ -278,6 +309,8 @@ class ColorOfNoiseVisualizer(docking_viewer.DockingViewer):
             imgui.separator_text('Inverse image')
             self.params.scale_inv_img_with_minmax = imgui.checkbox('Scale inverse image with min-max', self.params.scale_inv_img_with_minmax)[1]
             self.params.scale_inv_img_with_log = imgui.checkbox('Scale inverse image with log', self.params.scale_inv_img_with_log)[1]
+
+            self.params.add_title = imgui.checkbox('Add title', self.params.add_title)[1]
 
         # ---------------------------------------------------------------------------------------------------
         # Statistics

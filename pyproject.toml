@@ -14,4 +14,9 @@ dependencies = [
 
 [tool.uv.sources]
 pyviewer = { git = "https://github.com/harskish/pyviewer.git" }
-research-utilities = { git = "https://github.com/ShineiArakawa/research-utilities.git", rev = "v1.1.1" }
+research-utilities = { git = "https://github.com/ShineiArakawa/research-utilities.git", rev = "v1.1.2" }
+
+[dependency-groups]
+dev = [
+    "snakeviz>=2.2.2",
+]
