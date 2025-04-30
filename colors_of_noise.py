@@ -12,11 +12,14 @@ import torch
 from imgui_bundle import imgui, implot
 
 # --------------------------------------------------------------------------------------------------------------------------------------------------------
-# load the C++/CUDA module
+# Load the C++/CUDA module
 
+# Check PyTorch is compiled with CUDA and nvcc is available
 cuda_enabled = torch.cuda.is_available() and _torch_util.get_extension_loader()._check_command('nvcc')
 
+# Build and load the C++/CUDA module to compute the radial power spectral density
 _module = _signal._get_cpp_module(is_cuda=cuda_enabled, with_omp=True)
+
 print(f'---------------------------------------------------')
 print(f'_module.__doc__: {str(_module.__doc__)}')
 print(f'---------------------------------------------------')
@@ -27,21 +30,24 @@ print(f'---------------------------------------------------')
 
 @dataclasses.dataclass
 class Params:
+    """Parameters for the Color of Noise visualizer.
+    """
+
     # autopep8: off
-    seed                                : int          = 0
-    img_size                            : int          = 512
-    std                                 : float        = 1.0
-    n_radial_bins                       : int          = 64
-    n_points                            : int          = 32
+    seed                                : int          = 0      # random seed for noise generation
+    img_size                            : int          = 512    # image size
+    std                                 : float        = 1.0    # standard deviation of the Gaussian noise
+    n_radial_bins                       : int          = 64     # number of radial bins for the power spectral density
+    n_points                            : int          = 32     # number of points for the radial power spectral density
 
-    beta                                : float        = 0.0
+    beta                                : float        = 0.0    # exponent for the color of noise
 
-    scale_input_img_with_minmax         : bool         = False
-    scale_psd_with_minmax               : bool         = True
-    scale_inv_img_with_minmax           : bool         = False
-    scale_inv_img_with_log              : bool         = False
+    scale_input_img_with_minmax         : bool         = False  # scale input image with min-max
+    scale_psd_with_minmax               : bool         = True   # scale power spectral density with min-max
+    scale_inv_img_with_minmax           : bool         = False  # scale inverse image with min-max
+    scale_inv_img_with_log              : bool         = False  # scale inverse image with log
 
-    add_title                           : bool         = True
+    add_title                           : bool         = True   # add title to the images
     # autopep8: on
 
 # --------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -49,6 +55,26 @@ class Params:
 
 
 def normalize_0_to_1(x: np.ndarray, based_on_min_max: bool = False) -> np.ndarray:
+    """Normalize the input array to the range [0, 1].
+
+    Parameters
+    ----------
+    x : np.ndarray
+        Input array to be normalized.
+    based_on_min_max : bool, optional
+        If True, the normalization is based on the min and max values of the input array. If False, the normalization is based on the range [-1, 1]. Default is False.
+
+    Returns
+    -------
+    np.ndarray
+        Normalized array in the range [0, 1].
+
+    Raises
+    ------
+    ValueError
+        If the input array is not 2D or 3D.
+    """
+
     if based_on_min_max:
         if x.ndim == 3:
             min = np.min(x, axis=(0, 1), keepdims=True)
@@ -67,6 +93,19 @@ def normalize_0_to_1(x: np.ndarray, based_on_min_max: bool = False) -> np.ndarra
 
 
 def to_cuda_device(x: torch.Tensor) -> torch.Tensor:
+    """Copy the input tensor to the CUDA device if available.
+
+    Parameters
+    ----------
+    x : torch.Tensor
+        Input tensor to be copied.
+
+    Returns
+    -------
+    torch.Tensor
+        Copied tensor on the CUDA device if available, otherwise the original tensor.
+    """
+
     if torch.cuda.is_available():
         return x.cuda()
 
@@ -77,10 +116,16 @@ def to_cuda_device(x: torch.Tensor) -> torch.Tensor:
 
 
 class ColorOfNoiseVisualizer(docking_viewer.DockingViewer):
+    """Visualizer class for the Color of Noise.
+    """
+
     def __init__(self, name):
         super().__init__(name, with_implot=True)
 
-    def setup_state(self):
+    def setup_state(self) -> None:
+        """Initialize the state of the visualizer. Called by the super class.
+        """
+
         self.state.params = Params()
         self.state.prev_params = None
 
@@ -95,9 +140,27 @@ class ColorOfNoiseVisualizer(docking_viewer.DockingViewer):
 
     @property
     def params(self) -> Params:
+        """UI state parameters
+        """
+
         return self.state.params
 
     def _add_title(self, img: np.ndarray, title: str) -> np.ndarray:
+        """Add a title to the image.
+
+        Parameters
+        ----------
+        img : np.ndarray
+            Input image to add the title to.
+        title : str
+            Title to be added to the image.
+
+        Returns
+        -------
+        np.ndarray
+            Image with the title added.
+        """
+
         # based on 512
         text_size = max(int(36 * img.shape[0] / 512.0), 16)
 
@@ -110,12 +173,21 @@ class ColorOfNoiseVisualizer(docking_viewer.DockingViewer):
             text_size=text_size,
             is_BGR=False
         )
+
         img = img.astype(np.float32) / 255.0
         img = np.clip(img, 0.0, 1.0)
 
         return img
 
-    def compute(self):
+    def compute(self) -> np.ndarray:
+        """Compute the color of noise and its power spectral density.
+
+        Returns
+        -------
+        np.ndarray
+            Concatenated image with the input image, power spectral density, and inverse image.
+        """
+
         SPATIAL_AXES = (0, 1)
         NUM_RADIAL_BINS = 1024
 
@@ -229,7 +301,7 @@ class ColorOfNoiseVisualizer(docking_viewer.DockingViewer):
             (
                 self._add_title(norm_img, 'Input image') if self.params.add_title else norm_img,
                 self._add_title(psd_img, 'Power spectral density') if self.params.add_title else psd_img,
-                self._add_title(inv_img, 'Inverse image') if self.params.add_title else inv_img,
+                self._add_title(inv_img, 'Inversed image') if self.params.add_title else inv_img,
             ),
             axis=1
         )
@@ -240,7 +312,12 @@ class ColorOfNoiseVisualizer(docking_viewer.DockingViewer):
         return all_img
 
     @docking_viewer.dockable
-    def toolbar(self):
+    def toolbar(self) -> None:
+        """Build the toolbar UI for the Color of Noise visualizer.
+        """
+
+        # ---------------------------------------------------------------------------------------------------
+        # Parameters for the noise
         if imgui.collapsing_header('Noise parameters', flags=imgui.TreeNodeFlags_.default_open):
             self.params.seed = imgui.slider_int('Seed', self.params.seed, 0, 1000)[1]
             self.params.img_size = imgui.slider_int('Image size', self.params.img_size, 16, 1024)[1]
