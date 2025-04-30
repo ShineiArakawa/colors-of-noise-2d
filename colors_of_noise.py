@@ -355,7 +355,7 @@ class ColorOfNoiseVisualizer(docking_viewer.DockingViewer):
         # ---------------------------------------------------------------------------------------------------
         # Color of noise
         if imgui.collapsing_header('Color of noise', flags=imgui.TreeNodeFlags_.default_open):
-            self.params.beta = imgui.slider_float('Beta', self.params.beta, -4.0, 4.0)[1]
+            self.params.beta = imgui.slider_float('Beta', self.params.beta, -8.0, 8.0)[1]
 
             if imgui.button('Red'):
                 self.params.beta = -2.0
