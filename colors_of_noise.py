@@ -1,4 +1,6 @@
 import copy
+import datetime
+import pathlib
 
 import cv2
 import numpy as np
@@ -27,6 +29,8 @@ print(f'---------------------------------------------------')
 # --------------------------------------------------------------------------------------------------------------------------------------------------------
 # Parameters
 
+MPL_CMAPS = ['viridis', 'plasma', 'inferno', 'magma', 'cividis']
+
 
 @dataclasses.dataclass
 class Params:
@@ -47,8 +51,11 @@ class Params:
     scale_inv_img_with_minmax           : bool         = False  # scale inverse image with min-max
     scale_inv_img_with_log              : bool         = False  # scale inverse image with log
 
+    psd_cmap_id                         : int          = 0      # color map ID for the power spectral density, default is 0 (viridis)
+
     add_title                           : bool         = True   # add title to the images
     # autopep8: on
+
 
 # --------------------------------------------------------------------------------------------------------------------------------------------------------
 # utilities
@@ -120,6 +127,8 @@ class ColorOfNoiseVisualizer(docking_viewer.DockingViewer):
     """
 
     def __init__(self, name):
+        self.save_img_message = None
+
         super().__init__(name, with_implot=True)
 
     def setup_state(self) -> None:
@@ -144,6 +153,16 @@ class ColorOfNoiseVisualizer(docking_viewer.DockingViewer):
         """
 
         return self.state.params
+
+    @property
+    def psd_cmap(self) -> str:
+        """Color map for the power spectral density
+        """
+
+        if self.params is not None:
+            return MPL_CMAPS[self.params.psd_cmap_id]
+
+        return 'viridis'
 
     def _add_title(self, img: np.ndarray, title: str) -> np.ndarray:
         """Add a title to the image.
@@ -284,7 +303,7 @@ class ColorOfNoiseVisualizer(docking_viewer.DockingViewer):
         magnitude = 20.0 * np.log10(spectral_power_density + 1e-10)  # Convert to decibels
         psd_img = magnitude.astype(np.float32)
         psd_img = np.mean(psd_img, axis=2)
-        psd_img = _cm.apply_color_map(psd_img, 'viridis')  # Returned in BGR format
+        psd_img = _cm.apply_color_map(psd_img, self.psd_cmap)  # Returned in BGR format
         psd_img = cv2.cvtColor(psd_img, cv2.COLOR_BGR2RGB)
         self.state.texture_psd = psd_img.copy()
         psd_img = normalize_0_to_1(psd_img, based_on_min_max=self.params.scale_psd_with_minmax)
@@ -310,6 +329,59 @@ class ColorOfNoiseVisualizer(docking_viewer.DockingViewer):
         self.state.prev_params = copy.deepcopy(self.params)
 
         return all_img
+
+    def _save_img_impl(self, img: np.ndarray, file_path: pathlib.Path, based_on_min_max: bool) -> None:
+        """Save the image to a file.
+        """
+
+        # Normalize the image to [0, 255]
+        tmp_img = img
+        tmp_img = normalize_0_to_1(tmp_img, based_on_min_max)
+        tmp_img = (tmp_img * 255.0).astype(np.uint8)
+        tmp_img = cv2.cvtColor(tmp_img, cv2.COLOR_RGB2BGR)
+
+        # Save the image
+        cv2.imwrite(str(file_path), tmp_img)
+        print(f'Saved image to {file_path}')
+
+    def _save_input_img(self) -> pathlib.Path | None:
+        """Save the input image to a file.
+        """
+
+        if self.state.texture_img is not None:
+            timestamp = datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')
+            file_path = pathlib.Path(f'input_img_res={self.state.texture_img.shape[0]}_seed={self.params.seed}_beta={self.params.beta:.04f}_{timestamp}.png').resolve()
+
+            self._save_img_impl(self.state.texture_img, file_path, based_on_min_max=self.params.scale_input_img_with_minmax)
+            return file_path
+
+        return None
+
+    def _save_psd_img(self) -> pathlib.Path | None:
+        """Save the power spectral density image to a file.
+        """
+
+        if self.state.texture_psd is not None:
+            timestamp = datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')
+            file_path = pathlib.Path(f'psd_img_res={self.state.texture_psd.shape[0]}_seed={self.params.seed}_beta={self.params.beta:.04f}_{timestamp}.png').resolve()
+
+            self._save_img_impl(self.state.texture_psd, file_path, based_on_min_max=self.params.scale_psd_with_minmax)
+            return file_path
+
+        return None
+
+    def _save_inv_img(self) -> pathlib.Path | None:
+        """Save the inverted image to a file.
+        """
+
+        if self.state.texture_inv is not None:
+            timestamp = datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')
+            file_path = pathlib.Path(f'inv_img_res={self.state.texture_inv.shape[0]}_seed={self.params.seed}_beta={self.params.beta:.04f}_{timestamp}.png').resolve()
+
+            self._save_img_impl(self.state.texture_inv, file_path, based_on_min_max=self.params.scale_inv_img_with_minmax)
+            return file_path
+
+        return None
 
     @docking_viewer.dockable
     def toolbar(self) -> None:
@@ -355,7 +427,12 @@ class ColorOfNoiseVisualizer(docking_viewer.DockingViewer):
         # ---------------------------------------------------------------------------------------------------
         # Color of noise
         if imgui.collapsing_header('Color of noise', flags=imgui.TreeNodeFlags_.default_open):
-            self.params.beta = imgui.slider_float('Beta', self.params.beta, -8.0, 8.0)[1]
+            beta_range = (-8.0, 8.0)
+            imgui.text('Beta')
+            imgui.same_line()
+            self.params.beta = imgui.slider_float('## Beta slider', self.params.beta, beta_range[0], beta_range[1])[1]
+            imgui.same_line()
+            self.params.beta = imgui.input_float('##Beta input', self.params.beta, beta_range[0], beta_range[1])[1]
 
             if imgui.button('Red'):
                 self.params.beta = -2.0
@@ -382,12 +459,28 @@ class ColorOfNoiseVisualizer(docking_viewer.DockingViewer):
 
             imgui.separator_text('Power spectral density')
             self.params.scale_psd_with_minmax = imgui.checkbox('Scale PSD with min-max', self.params.scale_psd_with_minmax)[1]
+            self.params.psd_cmap_id = imgui.combo('Color map', self.params.psd_cmap_id, MPL_CMAPS)[1]
 
             imgui.separator_text('Inverse image')
             self.params.scale_inv_img_with_minmax = imgui.checkbox('Scale inverse image with min-max', self.params.scale_inv_img_with_minmax)[1]
             self.params.scale_inv_img_with_log = imgui.checkbox('Scale inverse image with log', self.params.scale_inv_img_with_log)[1]
 
             self.params.add_title = imgui.checkbox('Add title', self.params.add_title)[1]
+
+            # ---------------------------------------------------------------------------------------------------
+            if imgui.button('Save input image') and (file_path := self._save_input_img()):
+                self.save_img_message = f'Saved input image to {file_path}'
+
+            imgui.same_line()
+            if imgui.button('Save PSD image') and (file_path := self._save_psd_img()):
+                self.save_img_message = f'Saved PSD image to {file_path}'
+
+            imgui.same_line()
+            if imgui.button('Save inverted image') and (file_path := self._save_inv_img()):
+                self.save_img_message = f'Saved inverted image to {file_path}'
+
+            if self.save_img_message is not None:
+                imgui.text(self.save_img_message)
 
         # ---------------------------------------------------------------------------------------------------
         # Statistics
@@ -408,7 +501,7 @@ class ColorOfNoiseVisualizer(docking_viewer.DockingViewer):
         imgui.separator()
 
         # ---------------------------------------------------------------------------------------------------
-        if imgui.button('Reset all params', size=(-1, -1)):
+        if imgui.button('Reset all params', size=(-1, 30)):
             self.state.params = Params()
 
 

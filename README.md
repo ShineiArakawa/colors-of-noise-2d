@@ -4,6 +4,9 @@
 
 A lightweight tool for visualizing 2D colored noise patterns.
 
+## Gallery
+![Result](/assets/result.png)
+
 ## Features
 
 - 2D visualization of different colors of noise
