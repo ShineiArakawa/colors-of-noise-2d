@@ -1,12 +1,13 @@
 import copy
 import datetime
 import pathlib
+import pprint
 
 import cv2
 import numpy as np
 import pydantic.dataclasses as dataclasses
 import pyviewer.docking_viewer as docking_viewer
-import research_utilities.apply_color_map as _cm
+import research_utilities.cmap as _cm
 import research_utilities.plotting as _plotting
 import research_utilities.signal as _signal
 import research_utilities.torch_util as _torch_util
@@ -23,7 +24,13 @@ cuda_enabled = torch.cuda.is_available() and _torch_util.get_extension_loader().
 _module = _signal._get_cpp_module(is_cuda=cuda_enabled, with_omp=True)
 
 print(f'---------------------------------------------------')
-print(f'_module.__doc__: {str(_module.__doc__)}')
+print(f'# C++/CUDA module                                  ')
+print(f'---------------------------------------------------')
+print(f'Name: "{str(_module.__name__)}"                    ')
+print(f'')
+print(str(_module.__doc__))
+print(f'')
+print(pprint.pformat(_module.__dict__))
 print(f'---------------------------------------------------')
 
 # --------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -129,7 +136,7 @@ class ColorOfNoiseVisualizer(docking_viewer.DockingViewer):
     def __init__(self, name):
         self.save_img_message = None
 
-        super().__init__(name, with_implot=True)
+        super().__init__(name, with_font_awesome=True, with_implot=True)
 
     def setup_state(self) -> None:
         """Initialize the state of the visualizer. Called by the super class.
@@ -148,11 +155,13 @@ class ColorOfNoiseVisualizer(docking_viewer.DockingViewer):
         self.state.all_img = None
 
     @property
-    def params(self) -> Params:
+    def params(self) -> Params | None:
         """UI state parameters
         """
 
-        return self.state.params
+        state = getattr(self, 'state', None)
+
+        return state.params if state is not None else None
 
     @property
     def psd_cmap(self) -> str:
@@ -208,7 +217,6 @@ class ColorOfNoiseVisualizer(docking_viewer.DockingViewer):
         """
 
         SPATIAL_AXES = (0, 1)
-        NUM_RADIAL_BINS = 1024
 
         # Check if the parameters have changed
         if self.state.prev_params is not None and self.state.prev_params == self.params:
@@ -259,12 +267,12 @@ class ColorOfNoiseVisualizer(docking_viewer.DockingViewer):
 
         radial_profile: np.ndarray = _module.calc_radial_psd_profile(
             to_cuda_device(torch.from_numpy(spectral_power_density).unsqueeze(0).contiguous()),
-            NUM_RADIAL_BINS,
+            self.params.n_radial_bins,
             self.params.n_points,
         ).squeeze(0).cpu().numpy()  # [n_divs, n_points, n_channels]
 
         assert radial_profile.ndim == 3
-        assert radial_profile.shape[0] == NUM_RADIAL_BINS
+        assert radial_profile.shape[0] == self.params.n_radial_bins
         assert radial_profile.shape[2] == img.shape[2]
         assert not np.isnan(radial_profile).any()
         assert not np.isinf(radial_profile).any()
